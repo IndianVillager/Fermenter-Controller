@@ -1,0 +1,18 @@
+#put this in the when box
+trigger: state
+entity_id:
+  - sensor.fermentercontroller_brown_temp
+to: unavailable
+for:
+  hours: 0
+  minutes: 1
+  seconds: 0
+
+#Put this in the "Then Do" Box
+action: switch.turn_off
+metadata: {}
+data: {}
+target:
+  entity_id:
+    - switch.fermenters_plug_1
+    - switch.fermenters_plug_2
