@@ -1,0 +1,247 @@
+esphome:
+  name: fermentercontroller
+  friendly_name: Fermenter Controller
+
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: generate your own
+
+ota:
+  - platform: esphome
+    password: generate your own
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+ 
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Test Fallback Hotspot"
+    password: generate your own
+
+one_wire:
+  - platform: gpio
+    pin: GPIO23
+switch:
+  - platform: homeassistant
+    id: Brown_Cool
+    entity_id: switch.fermenters_plug_1
+  - platform: homeassistant
+    id: Brown_Heat
+    entity_id: switch.fermenters_plug_2
+  - platform: homeassistant
+    id: Keg_Cool
+    entity_id: switch.fermenters_plug_5
+  - platform: homeassistant
+    id: Keg_Heat
+    entity_id: switch.fermenters_plug_6
+  - platform: gpio
+    pin: GPIO19
+    id: Brown_Fan
+    name: "Brown Fan"
+  - platform: gpio
+    pin: GPIO18
+    id: Keg_Fan
+    name: "Keg Fan"
+
+sensor:
+  - platform: dallas_temp
+    address:  0x130b24444e460b28
+    resolution: 11
+    name: Brown Temp
+    id: brown_temp
+    update_interval: 30s
+  - platform: dallas_temp
+    address: 0x0b0b2444537d9028
+    resolution: 11
+    name: Keg Temp
+    id: keg_temp
+    update_interval: 30s
+
+
+climate:  
+  #Brown Fermenter
+  - platform: thermostat
+    name: "Brown Fermenter"
+    id: Brown_Fermenter
+    default_preset: FermentationChamber
+    on_boot_restore_from: memory    
+    visual:
+      min_temperature: -0
+      max_temperature: 40
+      temperature_step: 0.1
+    sensor: brown_temp    
+    cool_deadband: 0.5
+    cool_overrun: -0.1
+    heat_deadband: 0.5
+    heat_overrun: -0.1
+    min_cooling_off_time: 600s
+    min_cooling_run_time: 180s
+    min_heating_off_time: 10s
+    min_heating_run_time: 10s      
+    min_idle_time: 1s
+    cool_action:
+      - switch.turn_on: Brown_Cool
+      - switch.turn_on: Brown_Fan
+      - switch.turn_off: Brown_Heat 
+    heat_action:
+      - switch.turn_on: Brown_Heat
+      - switch.turn_off: Brown_Cool
+      - switch.turn_off: Brown_Fan
+    idle_action:
+     - switch.turn_off: Brown_Cool
+     - switch.turn_off: Brown_Heat
+     - switch.turn_off: Brown_Fan      
+    preset:
+    # Custom Preset
+    - name: FermentationChamber
+      mode: HEAT_COOL
+      default_target_temperature_high: 18
+      default_target_temperature_low: 18
+  #Kegerator Fermenter
+  - platform: thermostat
+    name: "Keg Fermenter"
+    id: Keg_Fermenter
+    default_preset: FermentationChamber
+    on_boot_restore_from: memory    
+    visual:
+      min_temperature: -0
+      max_temperature: 40
+      temperature_step: 0.1
+    sensor: keg_temp    
+    cool_deadband: 0.5
+    cool_overrun: -0.1
+    heat_deadband: 0.5
+    heat_overrun: -0.1
+    min_cooling_off_time: 600s
+    min_cooling_run_time: 180s
+    min_heating_off_time: 10s
+    min_heating_run_time: 10s      
+    min_idle_time: 1s
+    cool_action:
+      - switch.turn_on: Keg_Cool
+      - switch.turn_on: Keg_Fan
+      - switch.turn_off: Keg_Heat 
+    heat_action:
+      - switch.turn_on: Keg_Heat
+      - switch.turn_off: Keg_Cool
+      - switch.turn_off: Keg_Fan
+    idle_action:
+     - switch.turn_off: Keg_Cool
+     - switch.turn_off: Keg_Heat
+     - switch.turn_off: Keg_Fan      
+    preset:
+    # Custom Preset
+    - name: FermentationChamber
+      mode: HEAT_COOL
+      default_target_temperature_high: 18
+      default_target_temperature_low: 18
+
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+
+display:
+  - platform: lcd_pcf8574
+    dimensions: 20x4
+    address: 0x27
+    lambda: |-
+      it.print(0, 0,"Device    Temp State");
+      it.printf(0, 1,"Brown Box:%.1f %s", (id(brown_temp).state) * 9 / 5 + 32, (id(Brown_Fermenter).action == CLIMATE_ACTION_IDLE) ? "Idle" :
+        (id(Brown_Fermenter).action == CLIMATE_ACTION_HEATING) ? "Heat" :
+        (id(Brown_Fermenter).action == CLIMATE_ACTION_COOLING) ? "Cool" :
+        (id(Brown_Fermenter).action == CLIMATE_ACTION_OFF) ? "Off" :
+        "Unknown");
+      it.printf(0, 2,"Kegerator:%.1f %s", (id(keg_temp).state) * 9 / 5 + 32, (id(Keg_Fermenter).action == CLIMATE_ACTION_IDLE) ? "Idle" :
+        (id(Keg_Fermenter).action == CLIMATE_ACTION_HEATING) ? "Heat" :
+        (id(Keg_Fermenter).action == CLIMATE_ACTION_COOLING) ? "Cool" :
+        (id(Keg_Fermenter).action == CLIMATE_ACTION_OFF) ? "Off" :
+        "Unknown");
+#The lambda calls down below make up for the fact if the Kasa Plug was already on, and the esp boots into idle, 
+#the Kasa Plug will retain its last commanded state, not the current state the controller is trying to go for
+#Similarly if it boots into cool or heat, this ensures the Plug is actually in the appropriate state
+interval:
+  - interval: 60s
+    then:
+      - lambda: |-  
+          if (id(Brown_Fermenter).action == climate::CLIMATE_ACTION_COOLING &&
+              !id(Brown_Cool).state) {           
+            id(Brown_Cool).turn_on();
+          }
+          if (id(Brown_Fermenter).action == climate::CLIMATE_ACTION_COOLING &&
+              id(Brown_Heat).state) {           
+            id(Brown_Heat).turn_off();
+          }
+           if (id(Keg_Fermenter).action == climate::CLIMATE_ACTION_COOLING &&
+              !id(Keg_Cool).state) {           
+            id(Keg_Cool).turn_on();
+          }
+          if (id(Keg_Fermenter).action == climate::CLIMATE_ACTION_COOLING &&
+              id(Keg_Heat).state) {           
+            id(Keg_Heat).turn_off();
+          }
+          
+
+           if (id(Brown_Fermenter).action == climate::CLIMATE_ACTION_HEATING &&
+              !id(Brown_Heat).state) {           
+            id(Brown_Heat).turn_on();
+          }
+          if (id(Brown_Fermenter).action == climate::CLIMATE_ACTION_HEATING &&
+              id(Brown_Cool).state) {           
+            id(Brown_Cool).turn_off();
+          }
+            if (id(Keg_Fermenter).action == climate::CLIMATE_ACTION_HEATING &&
+              !id(Keg_Heat).state) {           
+            id(Keg_Heat).turn_on();
+          }
+          if (id(Keg_Fermenter).action == climate::CLIMATE_ACTION_HEATING &&
+              id(Keg_Cool).state) {           
+            id(Keg_Cool).turn_off();
+          }
+          
+
+            if (id(Brown_Fermenter).action == climate::CLIMATE_ACTION_IDLE &&
+              id(Brown_Heat).state) {           
+            id(Brown_Heat).turn_off();
+          }
+            if (id(Brown_Fermenter).action == climate::CLIMATE_ACTION_IDLE &&
+              id(Brown_Cool).state) {           
+            id(Brown_Cool).turn_off();
+          }
+          if (id(Keg_Fermenter).action == climate::CLIMATE_ACTION_IDLE &&
+              id(Keg_Cool).state) {           
+            id(Keg_Cool).turn_off();
+          }
+          if (id(Keg_Fermenter).action == climate::CLIMATE_ACTION_IDLE &&
+              id(Keg_Heat).state) {           
+            id(Keg_Heat).turn_off();
+          }
+
+          if (id(Brown_Fermenter).action == climate::CLIMATE_ACTION_OFF &&
+              id(Brown_Heat).state) {           
+            id(Brown_Heat).turn_off();
+          }
+            if (id(Brown_Fermenter).action == climate::CLIMATE_ACTION_OFF &&
+              id(Brown_Cool).state) {           
+            id(Brown_Cool).turn_off();
+          }
+          if (id(Keg_Fermenter).action == climate::CLIMATE_ACTION_OFF &&
+              id(Keg_Cool).state) {           
+            id(Keg_Cool).turn_off();
+          }
+          if (id(Keg_Fermenter).action == climate::CLIMATE_ACTION_OFF &&
+              id(Keg_Heat).state) {           
+            id(Keg_Heat).turn_off();
+          }
